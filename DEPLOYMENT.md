@@ -144,8 +144,8 @@ This guide provides detailed instructions for deploying the Hyperlocal Community
 2. **Deploy Application**
    ```bash
    # Clone repository
-   git clone https://github.com/02fe23bcs200-creator/Hyperlocal-community-market-place.git
-   cd Hyperlocal-community-market-place
+   git clone https://github.com/YOUR-USERNAME/YOUR-REPOSITORY-NAME.git
+   cd YOUR-REPOSITORY-NAME
    
    # Install dependencies
    npm install

@@ -41,9 +41,11 @@ Before running this application, make sure you have:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/02fe23bcs200-creator/Hyperlocal-community-market-place.git
-cd Hyperlocal-community-market-place
+git clone https://github.com/YOUR-USERNAME/YOUR-REPOSITORY-NAME.git
+cd YOUR-REPOSITORY-NAME
 ```
+
+*Replace YOUR-USERNAME and YOUR-REPOSITORY-NAME with your actual GitHub details*
 
 ### 2. Install Dependencies
 
