@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Listing - Hyperlocal Marketplace</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <a href="/" class="logo">🏪 Local Marketplace</a>
+                <nav>
+                    <ul class="nav-links">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/create-listing.html">Sell Item</a></li>
+                        <li><a href="/cart.html">Cart</a></li>
+                        <li><a href="/orders.html">My Orders</a></li>
+                        <li><a href="/seller-orders.html">Seller Dashboard</a></li>
+                        <li><a href="/chat.html">Messages</a></li>
+                    </ul>
+                </nav>
+                <div class="user-info">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <div class="form-container" style="max-width: 600px;">
+                <h2 class="text-center mb-3">Create New Listing</h2>
+                
+                <form id="listingForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="title">Title *</label>
+                        <input type="text" id="title" class="form-control" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="description">Description *</label>
+                        <textarea id="description" class="form-control" rows="4" required></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="price">Price (₹) *</label>
+                        <input type="number" id="price" class="form-control" min="0" step="1" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="category">Category *</label>
+                        <select id="category" class="form-control" required>
+                            <option value="">Select Category</option>
+                            <option value="electronics">Electronics</option>
+                            <option value="furniture">Furniture</option>
+                            <option value="clothing">Clothing</option>
+                            <option value="books">Books</option>
+                            <option value="sports">Sports</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="images">Images (Max 5)</label>
+                        <input type="file" id="images" class="form-control" multiple accept="image/*">
+                        <small>Supported formats: JPG, PNG, GIF, WebP (Max 5MB each)</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" id="getLocationBtn" class="btn btn-secondary btn-block">📍 Use My Location</button>
+                        <small id="locationStatus">Location helps buyers find your item</small>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-block" id="submitBtn" disabled>Create Listing</button>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <a href="/" class="btn btn-secondary">Cancel</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script>
+        let userLocation = null;
+
+        // Check authentication
+        if (!Auth.isAuthenticated()) {
+            window.location.href = '/login.html';
+        }
+
+        document.getElementById('getLocationBtn').addEventListener('click', async () => {
+            const statusEl = document.getElementById('locationStatus');
+            const submitBtn = document.getElementById('submitBtn');
+            
+            statusEl.textContent = 'Getting your location...';
+            
+            try {
+                userLocation = await getCurrentLocation();
+                statusEl.textContent = '✅ Location obtained successfully';
+                statusEl.style.color = 'green';
+                submitBtn.disabled = false;
+            } catch (error) {
+                statusEl.textContent = '❌ Location access denied. Please enable location access.';
+                statusEl.style.color = 'red';
+                console.error('Location error:', error);
+            }
+        });
+
+        // Validate file selection
+        document.getElementById('images').addEventListener('change', (e) => {
+            const files = e.target.files;
+            
+            if (files.length > 5) {
+                showAlert('Maximum 5 images allowed', 'error');
+                e.target.value = '';
+                return;
+            }
+            
+            for (let file of files) {
+                if (file.size > 5 * 1024 * 1024) { // 5MB
+                    showAlert('Each image must be less than 5MB', 'error');
+                    e.target.value = '';
+                    return;
+                }
+            }
+        });
+
+        document.getElementById('listingForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!userLocation) {
+                showAlert('Please get your location first', 'error');
+                return;
+            }
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'Creating Listing...';
+            submitBtn.disabled = true;
+            
+            try {
+                const formData = new FormData();
+                formData.append('title', document.getElementById('title').value);
+                formData.append('description', document.getElementById('description').value);
+                formData.append('price', document.getElementById('price').value);
+                formData.append('category', document.getElementById('category').value);
+                formData.append('latitude', userLocation.latitude);
+                formData.append('longitude', userLocation.longitude);
+                
+                // Add images
+                const images = document.getElementById('images').files;
+                for (let i = 0; i < images.length; i++) {
+                    formData.append('images', images[i]);
+                }
+                
+                const response = await Auth.apiRequest('/api/listings', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {} // Remove Content-Type to let browser set it for FormData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showAlert('Listing created successfully!', 'success');
+                    
+                    // Redirect to listing page
+                    setTimeout(() => {
+                        window.location.href = `/listing.html?id=${data._id}`;
+                    }, 1000);
+                } else {
+                    showAlert(data.message || 'Failed to create listing', 'error');
+                }
+            } catch (error) {
+                console.error('Create listing error:', error);
+                showAlert('Network error. Please try again.', 'error');
+            } finally {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

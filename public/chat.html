@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messages - Hyperlocal Marketplace</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <a href="/" class="logo">🏪 Local Marketplace</a>
+                <nav>
+                    <ul class="nav-links">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/create-listing.html">Sell Item</a></li>
+                        <li><a href="/cart.html">Cart</a></li>
+                        <li><a href="/orders.html">My Orders</a></li>
+                        <li><a href="/seller-orders.html">Seller Dashboard</a></li>
+                        <li><a href="/chat.html">Messages</a></li>
+                    </ul>
+                </nav>
+                <div class="user-info">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <div style="display: grid; grid-template-columns: 300px 1fr; gap: 2rem; height: 600px;">
+                <!-- Conversations List -->
+                <div style="background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;">
+                    <div style="padding: 1rem; background: #f8f9fa; border-bottom: 1px solid #eee;">
+                        <h3>Conversations</h3>
+                    </div>
+                    <div id="conversationsList" style="height: calc(100% - 60px); overflow-y: auto;">
+                        <!-- Conversations will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Chat Area -->
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3 id="chatTitle">Select a conversation</h3>
+                    </div>
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="text-center" style="padding: 2rem; color: #666;">
+                            Select a conversation to start messaging
+                        </div>
+                    </div>
+                    <div class="chat-input" id="chatInput" style="display: none;">
+                        <input type="text" id="messageInput" placeholder="Type your message..." class="form-control">
+                        <button onclick="sendMessage()" class="btn btn-primary">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script>
+        let currentConversation = null;
+        let currentUserId = null;
+
+        // Check authentication
+        if (!Auth.isAuthenticated()) {
+            window.location.href = '/login.html';
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const userId = urlParams.get('userId');
+            
+            await loadConversations();
+            
+            if (userId) {
+                await startConversation(userId);
+            }
+        });
+
+        async function loadConversations() {
+            try {
+                const response = await Auth.apiRequest('/api/messages/conversations');
+                const conversations = await response.json();
+                
+                const list = document.getElementById('conversationsList');
+                
+                if (conversations.length === 0) {
+                    list.innerHTML = '<div style="padding: 1rem; text-align: center; color: #666;">No conversations yet</div>';
+                    return;
+                }
+                
+                list.innerHTML = conversations.map(conv => `
+                    <div class="conversation-item" onclick="selectConversation('${conv.userId}', '${conv.userName}')" 
+                         style="padding: 1rem; border-bottom: 1px solid #eee; cursor: pointer; transition: background-color 0.3s;">
+                        <div style="font-weight: 600; margin-bottom: 0.25rem;">${conv.userName}</div>
+                        <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.25rem;">
+                            ${conv.isLastMessageFromMe ? 'You: ' : ''}${conv.lastMessage}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <small style="color: #999;">${formatDate(conv.lastMessageDate)}</small>
+                            ${conv.unreadCount > 0 ? `<span style="background: #e74c3c; color: white; border-radius: 50%; padding: 0.25rem 0.5rem; font-size: 0.8rem;">${conv.unreadCount}</span>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+                
+                // Add hover effect
+                document.querySelectorAll('.conversation-item').forEach(item => {
+                    item.addEventListener('mouseenter', () => {
+                        item.style.backgroundColor = '#f8f9fa';
+                    });
+                    item.addEventListener('mouseleave', () => {
+                        item.style.backgroundColor = '';
+                    });
+                });
+            } catch (error) {
+                console.error('Error loading conversations:', error);
+            }
+        }
+
+        async function selectConversation(userId, userName) {
+            currentUserId = userId;
+            currentConversation = userName;
+            
+            document.getElementById('chatTitle').textContent = userName;
+            document.getElementById('chatInput').style.display = 'flex';
+            
+            await loadMessages(userId);
+            
+            // Mark messages as read (simplified - would need individual message IDs in real app)
+            // For now, we'll just reload conversations to update unread count
+            setTimeout(loadConversations, 1000);
+        }
+
+        async function startConversation(userId) {
+            try {
+                // Get user info first
+                const userResponse = await Auth.apiRequest(`/api/auth/user/${userId}`);
+                let userName = 'User';
+                
+                if (userResponse.ok) {
+                    const userData = await userResponse.json();
+                    userName = userData.name;
+                }
+                
+                currentUserId = userId;
+                currentConversation = userName;
+                
+                document.getElementById('chatTitle').textContent = `Chat with ${userName}`;
+                document.getElementById('chatInput').style.display = 'flex';
+                
+                // Load existing messages or show empty state
+                await loadMessages(userId);
+                
+                // Focus on message input
+                document.getElementById('messageInput').focus();
+            } catch (error) {
+                console.error('Error starting conversation:', error);
+                // Fallback
+                currentUserId = userId;
+                currentConversation = 'User';
+                document.getElementById('chatTitle').textContent = 'New Conversation';
+                document.getElementById('chatInput').style.display = 'flex';
+                document.getElementById('messageInput').focus();
+            }
+        }
+
+        async function loadMessages(userId) {
+            try {
+                const response = await Auth.apiRequest(`/api/messages?userId=${userId}`);
+                const messages = await response.json();
+                
+                const chatMessages = document.getElementById('chatMessages');
+                const currentUser = Auth.getUser();
+                
+                if (messages.length === 0) {
+                    chatMessages.innerHTML = '<div class="text-center" style="padding: 2rem; color: #666;">No messages yet. Start the conversation!</div>';
+                    return;
+                }
+                
+                chatMessages.innerHTML = messages.map(message => {
+                    const isSent = message.senderId._id === currentUser.id;
+                    return `
+                        <div class="message ${isSent ? 'sent' : 'received'}">
+                            <div>${message.text}</div>
+                            <div class="message-time">${formatDate(message.createdAt)}</div>
+                        </div>
+                    `;
+                }).join('');
+                
+                // Scroll to bottom
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            } catch (error) {
+                console.error('Error loading messages:', error);
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            
+            if (!text || !currentUserId) return;
+            
+            try {
+                const response = await Auth.apiRequest('/api/messages', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        receiverId: currentUserId,
+                        text: text
+                    })
+                });
+                
+                if (response.ok) {
+                    input.value = '';
+                    await loadMessages(currentUserId);
+                    await loadConversations(); // Refresh conversations list
+                } else {
+                    const data = await response.json();
+                    showAlert(data.message || 'Failed to send message', 'error');
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+                showAlert('Network error. Please try again.', 'error');
+            }
+        }
+
+        // Send message on Enter key
+        document.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && e.target.id === 'messageInput') {
+                sendMessage();
+            }
+        });
+
+        // Auto-refresh messages every 5 seconds when in a conversation
+        setInterval(() => {
+            if (currentUserId) {
+                loadMessages(currentUserId);
+            }
+        }, 5000);
+    </script>
+</body>
+</html>

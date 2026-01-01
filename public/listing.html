@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Listing Details - Hyperlocal Marketplace</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <a href="/" class="logo">🏪 Local Marketplace</a>
+                <nav>
+                    <ul class="nav-links">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/create-listing.html">Sell Item</a></li>
+                        <li><a href="/cart.html">Cart</a></li>
+                        <li><a href="/orders.html">My Orders</a></li>
+                        <li><a href="/seller-orders.html">Seller Dashboard</a></li>
+                        <li><a href="/chat.html">Messages</a></li>
+                    </ul>
+                </nav>
+                <div class="user-info">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <div id="listingContent">
+                <!-- Will be populated by JavaScript -->
+            </div>
+        </div>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script>
+        let currentListing = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const listingId = urlParams.get('id');
+            
+            if (!listingId) {
+                showAlert('Listing not found', 'error');
+                window.location.href = '/';
+                return;
+            }
+            
+            await loadListing(listingId);
+        });
+
+        async function loadListing(listingId) {
+            const content = document.getElementById('listingContent');
+            showLoading(content);
+            
+            try {
+                const response = await fetch(`/api/listings/${listingId}`);
+                
+                if (!response.ok) {
+                    throw new Error('Listing not found');
+                }
+                
+                currentListing = await response.json();
+                renderListing(currentListing);
+                
+                // Load location info
+                await loadLocationInfo(currentListing.location.coordinates);
+                
+                // Load reviews
+                await loadReviews(currentListing.userId._id);
+            } catch (error) {
+                console.error('Error loading listing:', error);
+                content.innerHTML = `
+                    <div class="alert alert-error">
+                        <h3>Listing Not Found</h3>
+                        <p>The listing you're looking for doesn't exist or has been removed.</p>
+                        <a href="/" class="btn btn-primary">Back to Home</a>
+                    </div>
+                `;
+            }
+        }
+
+        function renderListing(listing) {
+            const content = document.getElementById('listingContent');
+            const currentUser = Auth.getUser();
+            const isOwner = currentUser && currentUser.id === listing.userId._id;
+            
+            content.innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                    <!-- Images Section -->
+                    <div>
+                        ${listing.images && listing.images.length > 0 ? `
+                            <div style="margin-bottom: 1rem;">
+                                <img src="/uploads/${listing.images[0]}" alt="${listing.title}" 
+                                     style="width: 100%; height: 400px; object-fit: cover; border-radius: 8px;">
+                            </div>
+                            ${listing.images.length > 1 ? `
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 0.5rem;">
+                                    ${listing.images.slice(1).map(img => `
+                                        <img src="/uploads/${img}" alt="${listing.title}" 
+                                             style="width: 100%; height: 80px; object-fit: cover; border-radius: 4px; cursor: pointer;"
+                                             onclick="changeMainImage('/uploads/${img}')">
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                        ` : `
+                            <div style="width: 100%; height: 400px; background: #f8f9fa; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #666;">
+                                No Image Available
+                            </div>
+                        `}
+                    </div>
+                    
+                    <!-- Details Section -->
+                    <div>
+                        <h1 style="margin-bottom: 1rem;">${listing.title}</h1>
+                        <div style="font-size: 2rem; font-weight: bold; color: #27ae60; margin-bottom: 1rem;">
+                            ${formatPrice(listing.price)}
+                        </div>
+                        
+                        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                            <h3>Seller Information</h3>
+                            <p><strong>Name:</strong> ${listing.userId.name}</p>
+                            <div class="rating">
+                                <strong>Rating:</strong>
+                                <span class="stars">${generateStars(listing.userId.rating)}</span>
+                                <span>(${listing.userId.rating.toFixed(1)})</span>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-bottom: 1rem;">
+                            <p><strong>Category:</strong> ${listing.category.charAt(0).toUpperCase() + listing.category.slice(1)}</p>
+                            <p><strong>Posted:</strong> ${formatDate(listing.createdAt)}</p>
+                            <p><strong>Status:</strong> ${listing.status.charAt(0).toUpperCase() + listing.status.slice(1)}</p>
+                            <p><strong>Location:</strong> <span id="locationInfo">Loading...</span></p>
+                        </div>
+                        
+                        ${Auth.isAuthenticated() && !isOwner ? `
+                            <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                                <button onclick="addToCart()" class="btn btn-success">🛒 Add to Cart</button>
+                                <button onclick="contactSeller()" class="btn btn-primary">💬 Contact Seller</button>
+                                <button onclick="makeRequest()" class="btn btn-secondary">📝 Make Request</button>
+                            </div>
+                        ` : ''}
+                        
+                        ${isOwner ? `
+                            <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                                <button onclick="editListing()" class="btn btn-secondary">✏️ Edit</button>
+                                <button onclick="deleteListing()" class="btn btn-danger">🗑️ Delete</button>
+                            </div>
+                        ` : ''}
+                        
+                        ${!Auth.isAuthenticated() ? `
+                            <div class="alert alert-info">
+                                <a href="/login.html">Login</a> to contact the seller
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <!-- Description -->
+                <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 2rem;">
+                    <h3>Description</h3>
+                    <p style="white-space: pre-wrap; line-height: 1.6;">${listing.description}</p>
+                </div>
+                
+                <!-- Reviews Section -->
+                <div id="reviewsSection" style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <h3>Seller Reviews</h3>
+                    <div id="reviewsList">
+                        <!-- Reviews will be loaded here -->
+                    </div>
+                    
+                    ${Auth.isAuthenticated() && !isOwner ? `
+                        <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #eee;">
+                            <h4>Leave a Review</h4>
+                            <form id="reviewForm">
+                                <div class="form-group">
+                                    <label>Rating</label>
+                                    <select id="rating" class="form-control" required>
+                                        <option value="">Select Rating</option>
+                                        <option value="5">⭐⭐⭐⭐⭐ Excellent</option>
+                                        <option value="4">⭐⭐⭐⭐ Good</option>
+                                        <option value="3">⭐⭐⭐ Average</option>
+                                        <option value="2">⭐⭐ Poor</option>
+                                        <option value="1">⭐ Terrible</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Comment</label>
+                                    <textarea id="comment" class="form-control" rows="3" required></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Submit Review</button>
+                            </form>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        function changeMainImage(src) {
+            const mainImg = document.querySelector('img[style*="height: 400px"]');
+            if (mainImg) {
+                mainImg.src = src;
+            }
+        }
+
+        async function loadReviews(userId) {
+            try {
+                const response = await fetch(`/api/reviews/${userId}`);
+                const reviews = await response.json();
+                
+                const reviewsList = document.getElementById('reviewsList');
+                
+                if (reviews.length === 0) {
+                    reviewsList.innerHTML = '<p>No reviews yet.</p>';
+                    return;
+                }
+                
+                reviewsList.innerHTML = reviews.map(review => `
+                    <div style="border-bottom: 1px solid #eee; padding: 1rem 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <strong>${review.reviewerId.name}</strong>
+                            <div class="rating">
+                                <span class="stars">${generateStars(review.rating)}</span>
+                                <span>(${review.rating})</span>
+                            </div>
+                        </div>
+                        <p>${review.comment}</p>
+                        <small style="color: #666;">${formatDate(review.createdAt)}</small>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading reviews:', error);
+            }
+        }
+
+        async function loadLocationInfo(coordinates) {
+            const locationInfo = document.getElementById('locationInfo');
+            locationInfo.innerHTML = '<span style="color: #666;">Loading location...</span>';
+            
+            try {
+                const [lng, lat] = coordinates;
+                
+                // Try multiple geocoding services for better coverage
+                let cityName = await getCityName(lat, lng);
+                
+                if (cityName) {
+                    locationInfo.innerHTML = `
+                        <span style="color: #666;">
+                            📍 ${cityName}
+                            <br><small>Approximate location for privacy</small>
+                        </span>
+                    `;
+                } else {
+                    // Fallback to coordinates if geocoding fails
+                    locationInfo.innerHTML = `
+                        <span style="color: #666;">
+                            📍 Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}
+                            <br><small>Approximate location</small>
+                        </span>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading location:', error);
+                locationInfo.innerHTML = '<span style="color: #666;">Location information unavailable</span>';
+            }
+        }
+
+        async function getCityName(lat, lng) {
+            // Try multiple free geocoding services
+            const services = [
+                {
+                    name: 'OpenStreetMap Nominatim',
+                    url: `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`,
+                    parser: (data) => {
+                        if (data.address) {
+                            return data.address.city || 
+                                   data.address.town || 
+                                   data.address.village || 
+                                   data.address.county || 
+                                   data.address.state_district ||
+                                   data.address.state;
+                        }
+                        return null;
+                    }
+                },
+                {
+                    name: 'BigDataCloud',
+                    url: `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+                    parser: (data) => {
+                        return data.city || data.locality || data.principalSubdivision;
+                    }
+                }
+            ];
+
+            for (const service of services) {
+                try {
+                    const response = await fetch(service.url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        const cityName = service.parser(data);
+                        if (cityName) {
+                            console.log(`Location found using ${service.name}:`, cityName);
+                            return cityName;
+                        }
+                    }
+                } catch (error) {
+                    console.log(`${service.name} failed:`, error.message);
+                    continue;
+                }
+            }
+
+            // If all services fail, try to determine city based on known coordinates
+            return getKnownCityName(lat, lng);
+        }
+
+        function getKnownCityName(lat, lng) {
+            // Database of major Indian cities with approximate coordinates
+            const indianCities = [
+                { name: 'Mumbai', lat: 19.0760, lng: 72.8777, radius: 0.5 },
+                { name: 'Delhi', lat: 28.7041, lng: 77.1025, radius: 0.5 },
+                { name: 'Bangalore', lat: 12.9716, lng: 77.5946, radius: 0.5 },
+                { name: 'Hyderabad', lat: 17.3850, lng: 78.4867, radius: 0.5 },
+                { name: 'Chennai', lat: 13.0827, lng: 80.2707, radius: 0.5 },
+                { name: 'Kolkata', lat: 22.5726, lng: 88.3639, radius: 0.5 },
+                { name: 'Pune', lat: 18.5204, lng: 73.8567, radius: 0.3 },
+                { name: 'Ahmedabad', lat: 23.0225, lng: 72.5714, radius: 0.3 },
+                { name: 'Jaipur', lat: 26.9124, lng: 75.7873, radius: 0.3 },
+                { name: 'Surat', lat: 21.1702, lng: 72.8311, radius: 0.3 },
+                { name: 'Lucknow', lat: 26.8467, lng: 80.9462, radius: 0.3 },
+                { name: 'Kanpur', lat: 26.4499, lng: 80.3319, radius: 0.3 },
+                { name: 'Nagpur', lat: 21.1458, lng: 79.0882, radius: 0.3 },
+                { name: 'Indore', lat: 22.7196, lng: 75.8577, radius: 0.3 },
+                { name: 'Thane', lat: 19.2183, lng: 72.9781, radius: 0.2 },
+                { name: 'Bhopal', lat: 23.2599, lng: 77.4126, radius: 0.3 },
+                { name: 'Visakhapatnam', lat: 17.6868, lng: 83.2185, radius: 0.3 },
+                { name: 'Pimpri-Chinchwad', lat: 18.6298, lng: 73.7997, radius: 0.2 },
+                { name: 'Patna', lat: 25.5941, lng: 85.1376, radius: 0.3 },
+                { name: 'Vadodara', lat: 22.3072, lng: 73.1812, radius: 0.3 },
+                { name: 'Ghaziabad', lat: 28.6692, lng: 77.4538, radius: 0.2 },
+                { name: 'Ludhiana', lat: 30.9010, lng: 75.8573, radius: 0.3 },
+                { name: 'Agra', lat: 27.1767, lng: 78.0081, radius: 0.3 },
+                { name: 'Nashik', lat: 19.9975, lng: 73.7898, radius: 0.3 },
+                { name: 'Faridabad', lat: 28.4089, lng: 77.3178, radius: 0.2 },
+                { name: 'Meerut', lat: 28.9845, lng: 77.7064, radius: 0.2 },
+                { name: 'Rajkot', lat: 22.3039, lng: 70.8022, radius: 0.3 },
+                { name: 'Kalyan-Dombivli', lat: 19.2403, lng: 73.1305, radius: 0.2 },
+                { name: 'Vasai-Virar', lat: 19.4914, lng: 72.8054, radius: 0.2 },
+                { name: 'Varanasi', lat: 25.3176, lng: 82.9739, radius: 0.3 },
+                { name: 'Srinagar', lat: 34.0837, lng: 74.7973, radius: 0.3 },
+                { name: 'Aurangabad', lat: 19.8762, lng: 75.3433, radius: 0.3 },
+                { name: 'Dhanbad', lat: 23.7957, lng: 86.4304, radius: 0.3 },
+                { name: 'Amritsar', lat: 31.6340, lng: 74.8723, radius: 0.3 },
+                { name: 'Navi Mumbai', lat: 19.0330, lng: 73.0297, radius: 0.2 },
+                { name: 'Allahabad', lat: 25.4358, lng: 81.8463, radius: 0.3 },
+                { name: 'Ranchi', lat: 23.3441, lng: 85.3096, radius: 0.3 },
+                { name: 'Howrah', lat: 22.5958, lng: 88.2636, radius: 0.2 },
+                { name: 'Coimbatore', lat: 11.0168, lng: 76.9558, radius: 0.3 },
+                { name: 'Jabalpur', lat: 23.1815, lng: 79.9864, radius: 0.3 },
+                { name: 'Gwalior', lat: 26.2183, lng: 78.1828, radius: 0.3 },
+                { name: 'Vijayawada', lat: 16.5062, lng: 80.6480, radius: 0.3 },
+                { name: 'Jodhpur', lat: 26.2389, lng: 73.0243, radius: 0.3 },
+                { name: 'Madurai', lat: 9.9252, lng: 78.1198, radius: 0.3 },
+                { name: 'Raipur', lat: 21.2514, lng: 81.6296, radius: 0.3 },
+                { name: 'Kota', lat: 25.2138, lng: 75.8648, radius: 0.3 },
+                { name: 'Chandigarh', lat: 30.7333, lng: 76.7794, radius: 0.2 },
+                { name: 'Guwahati', lat: 26.1445, lng: 91.7362, radius: 0.3 },
+                // International cities for testing
+                { name: 'San Francisco', lat: 37.7749, lng: -122.4194, radius: 0.3 },
+                { name: 'New York', lat: 40.7128, lng: -74.0060, radius: 0.5 },
+                { name: 'London', lat: 51.5074, lng: -0.1278, radius: 0.3 },
+                { name: 'Tokyo', lat: 35.6762, lng: 139.6503, radius: 0.5 },
+                { name: 'Sydney', lat: -33.8688, lng: 151.2093, radius: 0.3 }
+            ];
+
+            // Find the closest city within radius
+            for (const city of indianCities) {
+                const distance = Math.sqrt(
+                    Math.pow(lat - city.lat, 2) + Math.pow(lng - city.lng, 2)
+                );
+                if (distance <= city.radius) {
+                    return city.name;
+                }
+            }
+
+            // If no exact match, find the closest city
+            let closestCity = null;
+            let minDistance = Infinity;
+
+            for (const city of indianCities) {
+                const distance = Math.sqrt(
+                    Math.pow(lat - city.lat, 2) + Math.pow(lng - city.lng, 2)
+                );
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestCity = city;
+                }
+            }
+
+            // Return closest city if within reasonable distance (within ~100km)
+            if (closestCity && minDistance <= 1.0) {
+                return `Near ${closestCity.name}`;
+            }
+
+            return null;
+        }
+
+        async function addToCart() {
+            if (!Auth.isAuthenticated()) {
+                showAlert('Please login to add items to cart', 'error');
+                return;
+            }
+            
+            try {
+                const response = await Auth.apiRequest('/api/cart/add', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        listingId: currentListing._id,
+                        quantity: 1
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showAlert('Item added to cart!', 'success');
+                    
+                    // Update cart count in navigation if it exists
+                    const cartCount = document.getElementById('cartCount');
+                    if (cartCount) {
+                        const currentCount = parseInt(cartCount.textContent) || 0;
+                        cartCount.textContent = currentCount + 1;
+                    }
+                } else {
+                    showAlert(data.message || 'Failed to add item to cart', 'error');
+                }
+            } catch (error) {
+                console.error('Error adding to cart:', error);
+                showAlert('Network error. Please try again.', 'error');
+            }
+        }
+
+        function contactSeller() {
+            window.location.href = `/chat.html?userId=${currentListing.userId._id}`;
+        }
+
+        async function makeRequest() {
+            if (!Auth.isAuthenticated()) {
+                showAlert('Please login first', 'error');
+                return;
+            }
+            
+            const message = prompt('Enter a message for your request (optional):');
+            
+            try {
+                const response = await Auth.apiRequest('/api/requests', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        sellerId: currentListing.userId._id,
+                        listingId: currentListing._id,
+                        message: message || ''
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showAlert('Request sent successfully!', 'success');
+                } else {
+                    showAlert(data.message || 'Failed to send request', 'error');
+                }
+            } catch (error) {
+                console.error('Error making request:', error);
+                showAlert('Network error. Please try again.', 'error');
+            }
+        }
+
+        // Review form submission
+        document.addEventListener('submit', async (e) => {
+            if (e.target.id === 'reviewForm') {
+                e.preventDefault();
+                
+                const rating = document.getElementById('rating').value;
+                const comment = document.getElementById('comment').value;
+                
+                try {
+                    const response = await Auth.apiRequest('/api/reviews', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            revieweeId: currentListing.userId._id,
+                            rating: parseInt(rating),
+                            comment
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        showAlert('Review submitted successfully!', 'success');
+                        document.getElementById('reviewForm').reset();
+                        await loadReviews(currentListing.userId._id);
+                    } else {
+                        showAlert(data.message || 'Failed to submit review', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error submitting review:', error);
+                    showAlert('Network error. Please try again.', 'error');
+                }
+            }
+        });
+
+        function editListing() {
+            window.location.href = `/edit-listing.html?id=${currentListing._id}`;
+        }
+
+        async function deleteListing() {
+            if (!confirm('Are you sure you want to delete this listing?')) {
+                return;
+            }
+            
+            try {
+                const response = await Auth.apiRequest(`/api/listings/${currentListing._id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showAlert('Listing deleted successfully!', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    const data = await response.json();
+                    showAlert(data.message || 'Failed to delete listing', 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting listing:', error);
+                showAlert('Network error. Please try again.', 'error');
+            }
+        }
+    </script>
+</body>
+</html>

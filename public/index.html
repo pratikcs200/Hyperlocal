@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hyperlocal Community Marketplace</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <a href="/" class="logo">🏪 Local Marketplace</a>
+                <button class="nav-toggle" onclick="toggleNavigation()" aria-label="Toggle navigation">
+                    ☰
+                </button>
+                <nav>
+                    <ul class="nav-links" id="navLinks">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/create-listing.html">Sell Item</a></li>
+                        <li><a href="/cart.html">Cart (<span id="cartCount">0</span>)</a></li>
+                        <li><a href="/orders.html">My Orders</a></li>
+                        <li><a href="/seller-orders.html">Seller Dashboard</a></li>
+                        <li><a href="/chat.html">Messages</a></li>
+                    </ul>
+                </nav>
+                <div class="user-info">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <!-- Search Section -->
+            <section class="search-section">
+                <h2>Find Items Near You</h2>
+                <form class="search-form" id="searchForm">
+                    <div class="form-group">
+                        <label for="searchQuery">Search</label>
+                        <input type="text" id="searchQuery" class="form-control" placeholder="What are you looking for?">
+                    </div>
+                    <div class="form-group">
+                        <label for="category">Category</label>
+                        <select id="category" class="form-control">
+                            <option value="all">All Categories</option>
+                            <option value="electronics">Electronics</option>
+                            <option value="furniture">Furniture</option>
+                            <option value="clothing">Clothing</option>
+                            <option value="books">Books</option>
+                            <option value="sports">Sports</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="radius">Radius (km)</label>
+                        <select id="radius" class="form-control">
+                            <option value="5">5 km</option>
+                            <option value="10" selected>10 km</option>
+                            <option value="25">25 km</option>
+                            <option value="50">50 km</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <button type="submit" class="btn btn-primary">Search</button>
+                    </div>
+                </form>
+                
+                <div class="mt-2">
+                    <button id="useLocationBtn" class="btn btn-secondary">📍 Use My Location</button>
+                    <span id="locationStatus" class="ml-2"></span>
+                </div>
+            </section>
+
+            <!-- Listings Grid -->
+            <section id="listingsSection">
+                <div class="flex justify-between align-center mb-2">
+                    <h3>Available Listings</h3>
+                    <button id="refreshBtn" class="btn btn-secondary" onclick="refreshListings()" title="Refresh listings">
+                        🔄 Refresh
+                    </button>
+                </div>
+                
+                <div id="listingsGrid" class="cards-grid">
+                    <!-- Listings will be populated by JavaScript -->
+                </div>
+                
+                <div id="noResults" class="text-center mt-3 hidden">
+                    <p>No listings found. Try adjusting your search criteria.</p>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script>
+        // Toggle mobile navigation
+        function toggleNavigation() {
+            const navLinks = document.getElementById('navLinks');
+            navLinks.classList.toggle('show');
+        }
+
+        // Close mobile nav when clicking on links
+        document.addEventListener('click', (e) => {
+            const navLinks = document.getElementById('navLinks');
+            const navToggle = document.querySelector('.nav-toggle');
+            
+            if (e.target.closest('.nav-links a') || (!e.target.closest('.nav-toggle') && !e.target.closest('.nav-links'))) {
+                navLinks.classList.remove('show');
+            }
+        });
+
+        let userLocation = null;
+        let lastListingCount = 0;
+        let refreshInterval = null;
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadListings();
+            await loadCartCount();
+            
+            // Show/hide navigation links based on auth status
+            updateAuthenticatedNavigation();
+            
+            // Set up event listeners
+            document.getElementById('searchForm').addEventListener('submit', handleSearch);
+            document.getElementById('useLocationBtn').addEventListener('click', getUserLocation);
+            
+            // Start periodic refresh for new listings (every 30 seconds)
+            startPeriodicRefresh();
+        });
+
+        // Start periodic refresh to check for new listings
+        function startPeriodicRefresh() {
+            refreshInterval = setInterval(async () => {
+                await checkForNewListings();
+            }, 30000); // Check every 30 seconds
+        }
+
+        // Check for new listings without refreshing the display
+        async function checkForNewListings() {
+            try {
+                // Build query parameters (same as loadListings)
+                const params = new URLSearchParams();
+                
+                if (userLocation) {
+                    params.append('lat', userLocation.latitude);
+                    params.append('lng', userLocation.longitude);
+                }
+                
+                const category = document.getElementById('category').value;
+                if (category !== 'all') {
+                    params.append('category', category);
+                }
+                
+                const radius = document.getElementById('radius').value;
+                params.append('radius', radius);
+                
+                const response = await fetch(`/api/listings?${params}`);
+                const listings = await response.json();
+                
+                // Check if there are new listings
+                if (lastListingCount > 0 && listings.length > lastListingCount) {
+                    const newCount = listings.length - lastListingCount;
+                    showUpdateNotification('New listings available!', newCount);
+                }
+                
+                // Update count for next check
+                lastListingCount = listings.length;
+                
+            } catch (error) {
+                console.error('Error checking for new listings:', error);
+            }
+        }
+
+        // Update navigation for authenticated users
+        function updateAuthenticatedNavigation() {
+            const ordersLink = document.querySelector('a[href="/orders.html"]');
+            const cartLink = document.querySelector('a[href="/cart.html"]');
+            const messagesLink = document.querySelector('a[href="/chat.html"]');
+            const sellerLink = document.querySelector('a[href="/seller-orders.html"]');
+            
+            if (Auth.isAuthenticated()) {
+                // Show authenticated user links
+                if (ordersLink) ordersLink.parentElement.style.display = 'block';
+                if (cartLink) cartLink.parentElement.style.display = 'block';
+                if (messagesLink) messagesLink.parentElement.style.display = 'block';
+                if (sellerLink) sellerLink.parentElement.style.display = 'block';
+                
+                // Load pending orders count for seller dashboard
+                loadPendingOrdersCount();
+            } else {
+                // Hide authenticated user links
+                if (ordersLink) ordersLink.parentElement.style.display = 'none';
+                if (cartLink) cartLink.parentElement.style.display = 'none';
+                if (messagesLink) messagesLink.parentElement.style.display = 'none';
+                if (sellerLink) sellerLink.parentElement.style.display = 'none';
+            }
+        }
+
+        // Load pending orders count for seller
+        async function loadPendingOrdersCount() {
+            try {
+                const response = await Auth.apiRequest('/api/orders/seller');
+                const orders = await response.json();
+                const pendingCount = orders.filter(order => order.status === 'pending').length;
+                
+                const sellerLink = document.querySelector('a[href="/seller-orders.html"]');
+                if (sellerLink && pendingCount > 0) {
+                    sellerLink.innerHTML = `Seller Dashboard <span style="background: #e74c3c; color: white; border-radius: 50%; padding: 0.25rem 0.5rem; font-size: 0.8rem; margin-left: 0.5rem;">${pendingCount}</span>`;
+                }
+            } catch (error) {
+                console.error('Error loading pending orders count:', error);
+            }
+        }
+
+        // Get user's location
+        async function getUserLocation() {
+            const statusEl = document.getElementById('locationStatus');
+            statusEl.textContent = 'Getting location...';
+            
+            try {
+                userLocation = await getCurrentLocation();
+                statusEl.textContent = '✅ Location found';
+                await loadListings();
+            } catch (error) {
+                statusEl.textContent = '❌ Location access denied';
+                console.error('Location error:', error);
+            }
+        }
+
+        // Handle search form submission
+        async function handleSearch(e) {
+            e.preventDefault();
+            await loadListings();
+        }
+
+        // Load listings from API
+        async function loadListings() {
+            const grid = document.getElementById('listingsGrid');
+            const noResults = document.getElementById('noResults');
+            
+            showLoading(grid);
+            
+            try {
+                // Build query parameters
+                const params = new URLSearchParams();
+                
+                if (userLocation) {
+                    params.append('lat', userLocation.latitude);
+                    params.append('lng', userLocation.longitude);
+                }
+                
+                const category = document.getElementById('category').value;
+                if (category !== 'all') {
+                    params.append('category', category);
+                }
+                
+                const radius = document.getElementById('radius').value;
+                params.append('radius', radius);
+                
+                const response = await fetch(`/api/listings?${params}`);
+                const listings = await response.json();
+                
+                // Update listing count for new listing detection
+                lastListingCount = listings.length;
+                
+                if (listings.length === 0) {
+                    grid.innerHTML = '';
+                    noResults.classList.remove('hidden');
+                } else {
+                    noResults.classList.add('hidden');
+                    renderListings(listings);
+                }
+            } catch (error) {
+                console.error('Error loading listings:', error);
+                showAlert('Error loading listings', 'error');
+                grid.innerHTML = '';
+            }
+        }
+
+        // Render listings in grid
+        function renderListings(listings) {
+            const grid = document.getElementById('listingsGrid');
+            
+            grid.innerHTML = listings.map(listing => `
+                <div class="card">
+                    ${listing.images && listing.images.length > 0 
+                        ? `<img src="/uploads/${listing.images[0]}" alt="${listing.title}" class="card-image">`
+                        : '<div class="card-image" style="display: flex; align-items: center; justify-content: center; background: #f8f9fa; color: #666;">No Image</div>'
+                    }
+                    <div class="card-content">
+                        <h3 class="card-title">${listing.title}</h3>
+                        <p class="card-description">${listing.description}</p>
+                        <div class="card-price">${formatPrice(listing.price)}</div>
+                        <div class="card-meta">
+                            <span>By ${listing.userId.name}</span>
+                            <div class="rating">
+                                <span class="stars">${generateStars(listing.userId.rating)}</span>
+                                <span>(${listing.userId.rating.toFixed(1)})</span>
+                            </div>
+                        </div>
+                        <div class="card-actions">
+                            <a href="/listing.html?id=${listing._id}" class="btn btn-primary">View Details</a>
+                            ${Auth.isAuthenticated() ? `
+                                <button onclick="addToCartFromHome('${listing._id}')" class="btn btn-success">Add to Cart</button>
+                                <button onclick="contactSeller('${listing.userId._id}')" class="btn btn-secondary">Contact</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Demo function to test notifications (can be called from browser console)
+        window.testUpdateNotification = function() {
+            showUpdateNotification('New listings available!', 3);
+        };
+
+        // Demo function for single update
+        window.testSingleUpdate = function() {
+            showUpdateNotification('New message received!');
+        };
+
+        // Contact seller function
+        function contactSeller(sellerId) {
+            if (!Auth.isAuthenticated()) {
+                showAlert('Please login to contact sellers', 'error');
+                return;
+            }
+            window.location.href = `/chat.html?userId=${sellerId}`;
+        }
+
+        // Load cart count
+        async function loadCartCount() {
+            if (!Auth.isAuthenticated()) return;
+            
+            try {
+                const response = await Auth.apiRequest('/api/cart');
+                const cartData = await response.json();
+                document.getElementById('cartCount').textContent = cartData.items.length;
+            } catch (error) {
+                console.error('Error loading cart count:', error);
+            }
+        }
+
+        // Manual refresh function
+        async function refreshListings() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const originalText = refreshBtn.innerHTML;
+            
+            // Show loading state
+            refreshBtn.innerHTML = '🔄 Refreshing...';
+            refreshBtn.disabled = true;
+            
+            try {
+                await loadListings();
+                showAlert('Listings refreshed successfully!', 'success');
+            } catch (error) {
+                showAlert('Failed to refresh listings', 'error');
+            } finally {
+                // Reset button state
+                refreshBtn.innerHTML = originalText;
+                refreshBtn.disabled = false;
+            }
+        }
+
+        // Add to cart from home page
+        async function addToCartFromHome(listingId) {
+            if (!Auth.isAuthenticated()) {
+                showAlert('Please login to add items to cart', 'error');
+                return;
+            }
+            
+            try {
+                const response = await Auth.apiRequest('/api/cart/add', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        listingId: listingId,
+                        quantity: 1
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showAlert('Item added to cart!', 'success');
+                    await loadCartCount();
+                } else {
+                    showAlert(data.message || 'Failed to add item to cart', 'error');
+                }
+            } catch (error) {
+                console.error('Error adding to cart:', error);
+                showAlert('Network error. Please try again.', 'error');
+            }
+        }
+    </script>
+</body>
+</html>

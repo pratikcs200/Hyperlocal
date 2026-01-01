@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkout - Hyperlocal Marketplace</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <a href="/" class="logo">🏪 Local Marketplace</a>
+                <nav>
+                    <ul class="nav-links">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/cart.html">Cart</a></li>
+                    </ul>
+                </nav>
+                <div class="user-info">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <h2>Checkout</h2>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem;">
+                <!-- Shipping Address Form -->
+                <div>
+                    <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                        <h3>Shipping Address</h3>
+                        <form id="checkoutForm">
+                            <div class="form-group">
+                                <label for="fullName">Full Name *</label>
+                                <input type="text" id="fullName" class="form-control" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="phone">Phone Number *</label>
+                                <input type="tel" id="phone" class="form-control" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="address">Address *</label>
+                                <textarea id="address" class="form-control" rows="3" required placeholder="House/Flat No., Street, Area"></textarea>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="city">City *</label>
+                                    <input type="text" id="city" class="form-control" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="state">State *</label>
+                                    <input type="text" id="state" class="form-control" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="pincode">PIN Code *</label>
+                                <input type="text" id="pincode" class="form-control" required pattern="[0-9]{6}" maxlength="6">
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary btn-block" id="placeOrderBtn">Place Order</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <!-- Order Summary -->
+                <div>
+                    <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); position: sticky; top: 2rem;">
+                        <h3>Order Summary</h3>
+                        <div id="orderSummary">
+                            <!-- Order summary will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script>
+        // Check authentication
+        if (!Auth.isAuthenticated()) {
+            window.location.href = '/login.html';
+        }
+
+        let cartData = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadOrderSummary();
+            
+            document.getElementById('checkoutForm').addEventListener('submit', handleCheckout);
+        });
+
+        async function loadOrderSummary() {
+            try {
+                const response = await Auth.apiRequest('/api/cart');
+                cartData = await response.json();
+                
+                if (cartData.items.length === 0) {
+                    showAlert('Your cart is empty', 'error');
+                    window.location.href = '/cart.html';
+                    return;
+                }
+                
+                const orderSummary = document.getElementById('orderSummary');
+                orderSummary.innerHTML = `
+                    <div style="max-height: 400px; overflow-y: auto; margin-bottom: 1rem;">
+                        ${cartData.items.map(item => `
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; border-bottom: 1px solid #eee;">
+                                <div style="flex: 1;">
+                                    <h5 style="margin: 0 0 0.5rem 0;">${item.listingId.title}</h5>
+                                    <small style="color: #666;">Qty: ${item.quantity}</small>
+                                </div>
+                                <div style="font-weight: bold;">
+                                    ${formatPrice(item.listingId.price * item.quantity)}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div style="border-top: 2px solid #eee; padding-top: 1rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span>Subtotal</span>
+                            <span>${formatPrice(cartData.totalAmount)}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span>Shipping</span>
+                            <span>Free</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span>Tax</span>
+                            <span>Included</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 1.2rem; font-weight: bold; border-top: 1px solid #eee; padding-top: 1rem;">
+                            <span>Total</span>
+                            <span>${formatPrice(cartData.totalAmount)}</span>
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading order summary:', error);
+                showAlert('Error loading order summary', 'error');
+            }
+        }
+
+        async function handleCheckout(e) {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('placeOrderBtn');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'Placing Order...';
+            submitBtn.disabled = true;
+            
+            try {
+                const shippingAddress = {
+                    fullName: document.getElementById('fullName').value,
+                    phone: document.getElementById('phone').value,
+                    address: document.getElementById('address').value,
+                    city: document.getElementById('city').value,
+                    state: document.getElementById('state').value,
+                    pincode: document.getElementById('pincode').value
+                };
+                
+                const response = await Auth.apiRequest('/api/orders/checkout', {
+                    method: 'POST',
+                    body: JSON.stringify({ shippingAddress })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showAlert('Order placed successfully!', 'success');
+                    
+                    // Redirect to order confirmation page
+                    setTimeout(() => {
+                        window.location.href = `/order-confirmation.html?orderId=${data.order._id}`;
+                    }, 1000);
+                } else {
+                    showAlert(data.message || 'Failed to place order', 'error');
+                }
+            } catch (error) {
+                console.error('Error placing order:', error);
+                showAlert('Network error. Please try again.', 'error');
+            } finally {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
